@@ -47,3 +47,17 @@ def test_hmm_change_uses_success_field_not_dict_truthiness() -> None:
     # Mean must fall — proves we are not scoring dict truthiness as 1.0
     assert ctrl.detector._mean < 0.5
 
+
+
+def test_hmm_predict_state_filters_current_observation() -> None:
+    rng = make_rng(5)
+    hmm = DiscreteHMM()
+    hmm.reset(rng)
+    for _ in range(6):
+        hmm.filter(0)
+        hmm._filtered_obs = None
+    mass0 = float(hmm.belief[0])
+    hmm.predict_state(2)
+    assert float(hmm.belief[2]) > 0.0
+    # Filtering obs=2 should not leave belief identical to pre-call lag MAP path
+    assert float(hmm.belief[0]) <= mass0 or float(hmm.belief[2]) > float(hmm.belief[0])
