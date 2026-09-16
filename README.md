@@ -58,12 +58,20 @@ generated-results/       # Gitignored CLI outputs
 ### TLP fairness invariants (hardening)
 
 - Environment schedules and observation/noise draws are **pre-generated** on a world
-  RNG independent of controller RNGs (identical worlds across controllers).
+  RNG independent of controller RNGs (identical worlds across controllers: regimes,
+  observation flags, encodings, and outcome uniforms).
 - HMM action selection **filters the current observation** once per step (not lag-only).
 - **Decision correctness** is `action == best_action(regime)`, separate from physical
   survival/consequence in the reward decomposition.
-- Guarded Seer targets `brick_under_cunning_wolf` (brick optimal under cunning wolf),
-  not ordinary wolf where wood is optimal.
+- **Genuine OOM claim:** Guarded Seer targets `brick_under_silent_threat`. Regime
+  `silent_threat` encodes like calm (obs 0) so the HMM prefers straw, but brick is
+  optimal — contradicting the in-model obs→action mapping. `cunning_wolf` (obs 2 →
+  brick) is an *in-model* hard regime, not OOM. Hard-coded brick exploration is
+  logged as exploration, never as Seer-discovered competence.
+- Genome traits that causally affect TLP when evolution supplies an Agent:
+  `exploration_tendency` → explore_prob; `observation_sensitivity` → paid observation
+  access; `caution` → straw→wood upgrades; `validation_threshold` → Seer promotion
+  score floor. (`learning_rate` remains expressed but unused by the TLP controllers.)
 - Exploration, authority overrides, promotions/demotions, and their costs are logged
   as distinct audit fields — not collapsed into one opaque score.
 
