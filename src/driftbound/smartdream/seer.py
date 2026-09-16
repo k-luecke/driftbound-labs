@@ -50,6 +50,7 @@ class GuardedSeer:
     authority_horizon: int = 20
     hypotheses: dict[str, SeerHypothesis] = field(default_factory=dict)
     promotions: int = 0
+    demotions: int = 0
     false_promotions: int = 0
     _discovery_locked: bool = False
     _validation_used_steps: set[int] = field(default_factory=set)
@@ -166,6 +167,7 @@ class GuardedSeer:
             if h.authority_remaining <= 0:
                 h.phase = SeerPhase.DEMOTED
                 h.promoted = False
+                self.demotions += 1
         return seer_action, True
 
     def record_false_promotion(self, hypothesis_id: str) -> None:
@@ -182,6 +184,7 @@ class GuardedSeer:
         return {
             "n_hypotheses": len(self.hypotheses),
             "promotions": self.promotions,
+            "demotions": self.demotions,
             "false_promotions": self.false_promotions,
             "false_promotion_rate": self.false_promotion_rate(),
             "correction": "bonferroni",

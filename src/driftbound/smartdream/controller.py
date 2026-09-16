@@ -14,19 +14,35 @@ from driftbound.smartdream.seer import GuardedSeer
 
 
 @dataclass
+class DecisionInfo:
+    """Per-step decision audit trail (exploration vs authority vs base)."""
+
+    action: str
+    explored: bool = False
+    authority_override: bool = False
+    demoted: bool = False
+    base_action: str | None = None
+
+
+@dataclass
 class FixedPolicyController:
     """Fixed action policy (baseline)."""
 
     name: str = "fixed_policy"
     action: str = "wood"
+    last_decision: DecisionInfo | None = None
 
     def reset(self, rng: Generator) -> None:
-        return None
+        del rng
+        self.last_decision = None
 
     def act(self, observation: Any, rng: Generator) -> str:
+        del observation, rng
+        self.last_decision = DecisionInfo(action=self.action)
         return self.action
 
     def update(self, observation: Any, action: Any, outcome: Any, rng: Generator) -> None:
+        del observation, action, outcome, rng
         return None
 
 
@@ -35,16 +51,22 @@ class HMMController:
     name: str = "hmm"
     hmm: DiscreteHMM = field(default_factory=DiscreteHMM)
     actions: tuple[str, ...] = ("straw", "wood", "brick")
+    last_decision: DecisionInfo | None = None
 
     def reset(self, rng: Generator) -> None:
         self.hmm.reset(rng)
+        self.last_decision = None
 
     def act(self, observation: Any, rng: Generator) -> str:
+        del rng
+        # Filter on *current* observation exactly once; action uses filtered MAP.
         state = self.hmm.predict_state(observation)
-        # Map latent state index to defensive action
-        return self.actions[int(state) % len(self.actions)]
+        action = self.actions[int(state) % len(self.actions)]
+        self.last_decision = DecisionInfo(action=action, base_action=action)
+        return action
 
     def update(self, observation: Any, action: Any, outcome: Any, rng: Generator) -> None:
+        del action, outcome
         self.hmm.update(observation, rng)
 
 
@@ -55,20 +77,27 @@ class HMMChangeController:
     detector: PageHinkleyDetector = field(default_factory=PageHinkleyDetector)
     actions: tuple[str, ...] = ("straw", "wood", "brick")
     _last_change: int = -1
+    last_decision: DecisionInfo | None = None
 
     def reset(self, rng: Generator) -> None:
         self.hmm.reset(rng)
         self.detector.reset()
         self._last_change = -1
+        self.last_decision = None
 
     def act(self, observation: Any, rng: Generator) -> str:
+        del rng
         state = self.hmm.predict_state(observation)
-        if self.detector.changed:
-            # On detected change, prefer more cautious action
-            return "brick"
-        return self.actions[int(state) % len(self.actions)]
+        action = (
+            "brick"
+            if self.detector.changed
+            else self.actions[int(state) % len(self.actions)]
+        )
+        self.last_decision = DecisionInfo(action=action, base_action=action)
+        return action
 
     def update(self, observation: Any, action: Any, outcome: Any, rng: Generator) -> None:
+        del action
         # Correctness proxy from bool or TLP outcome dict (dict is always truthy).
         if isinstance(outcome, dict):
             score = 1.0 if outcome.get("success") else 0.0
@@ -78,19 +107,27 @@ class HMMChangeController:
         if self.detector.changed:
             self.hmm.reset(rng)
             self.detector.reset()
-        self.hmm.update(observation, rng)
+            # After reset, filter current obs so next belief is not empty prior lag
+            self.hmm.filter(observation)
+            self.hmm._filtered_obs = None
+        else:
+            self.hmm.update(observation, rng)
 
 
 @dataclass
 class SwitchingExpertsController:
     name: str = "switching_experts"
     experts: FixedShareExperts = field(default_factory=FixedShareExperts)
+    last_decision: DecisionInfo | None = None
 
     def reset(self, rng: Generator) -> None:
         self.experts.reset(rng)
+        self.last_decision = None
 
     def act(self, observation: Any, rng: Generator) -> str:
-        return self.experts.act(observation, rng)
+        action = self.experts.act(observation, rng)
+        self.last_decision = DecisionInfo(action=action, base_action=action)
+        return action
 
     def update(self, observation: Any, action: Any, outcome: Any, rng: Generator) -> None:
         self.experts.update(observation, action, outcome, rng)
@@ -104,21 +141,49 @@ class GuardedSeerHybridController:
     name: str = "guarded_seer_hybrid"
     base: HMMController = field(default_factory=HMMController)
     seer_preferred_action: str = "brick"
+    explore_prob: float = 0.25
     _step: int = 0
+    last_decision: DecisionInfo | None = None
+    exploration_count: int = 0
+    authority_override_count: int = 0
+    demotion_count: int = 0
 
     def reset(self, rng: Generator) -> None:
         self.base.reset(rng)
         self._step = 0
+        self.last_decision = None
+        self.exploration_count = 0
+        self.authority_override_count = 0
+        self.demotion_count = 0
 
     def act(self, observation: Any, rng: Generator) -> str:
         base_action = self.base.act(observation, rng)
-        # Explore preferred action in discovery/validation so Vision can both
-        # propose and independently validate (otherwise promotion never fires).
         phase = self.seer.phase_at(self._step).value
-        if phase in ("discovery", "validation") and float(rng.random()) < 0.25:
-            return self.seer_preferred_action
-        action, _used = self.seer.advisory_action(
-            self._step, base_action, self.seer_preferred_action
+        explored = False
+        demoted = False
+        # Explore preferred action in discovery/validation so Vision can both
+        # propose and independently validate the cunning-wolf brick claim.
+        if phase in ("discovery", "validation") and float(rng.random()) < self.explore_prob:
+            explored = True
+            self.exploration_count += 1
+            action = self.seer_preferred_action
+            override = False
+        else:
+            demotions_before = self.seer.demotions
+            action, override = self.seer.advisory_action(
+                self._step, base_action, self.seer_preferred_action
+            )
+            if override:
+                self.authority_override_count += 1
+            if self.seer.demotions > demotions_before:
+                demoted = True
+                self.demotion_count += 1
+        self.last_decision = DecisionInfo(
+            action=str(action),
+            explored=explored,
+            authority_override=override if not explored else False,
+            demoted=demoted,
+            base_action=base_action,
         )
         return str(action)
 
