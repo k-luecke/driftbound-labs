@@ -53,6 +53,11 @@ generated-results/       # Gitignored CLI outputs
 3. Run the Three Little Pigs CLI with `--seed 42`; JSON lands in `generated-results/`.
 4. Same seed ⇒ same metrics (deterministic NumPy `Generator`s passed explicitly).
 
+## CI
+
+The intended GitHub Actions workflow is checked in as [`docs/ci/github-actions.yml`](docs/ci/github-actions.yml).
+Copy it to `.github/workflows/ci.yml` to enable Actions (requires a token/app with the `workflow` scope to push that path).
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Cite via [`CITATION.cff`](CITATION.cff).
