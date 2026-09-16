@@ -1,0 +1,20 @@
+# EXAMPLE ONLY — not a completed experiment. No results attached.
+name: rf_adaptive_sensing_example
+status: planned
+legal:
+  disclaimer: >
+    Comply with local spectrum regulations. Prefer simulation or
+    licensed/unlicensed-compliant passive sensing. No unlawful TX.
+hardware:
+  sdr: "TBD"
+  antenna: "TBD"
+  band_hz: null
+acquisition:
+  sample_rate_hz: null
+  duration_s: null
+analysis:
+  methods: []
+results:
+  # Intentionally empty — do not invent metrics
+  metrics: {}
+  notes: "No fabricated results."

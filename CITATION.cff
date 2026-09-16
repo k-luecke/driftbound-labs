@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Drift Bound Labs"
+authors:
+  - family-names: Luecke
+    given-names: Kyle
+    orcid: "https://orcid.org/0009-0000-0000-0000"
+type: software
+abstract: >-
+  Reproducible experiments in adaptive assurance, agent populations,
+  nonlinear control, and physical sensing under uncertain and changing conditions.
+license: MIT
+repository-code: "https://github.com/k-luecke/driftbound-labs"
+keywords:
+  - adaptive control
+  - agent populations
+  - change detection
+  - hidden Markov models
+  - research software
+version: 0.1.0
+date-released: "2026-09-16"
