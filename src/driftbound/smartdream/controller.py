@@ -69,8 +69,11 @@ class HMMChangeController:
         return self.actions[int(state) % len(self.actions)]
 
     def update(self, observation: Any, action: Any, outcome: Any, rng: Generator) -> None:
-        # Use correctness proxy: outcome truthiness encoded as 1/0 float
-        score = 1.0 if outcome else 0.0
+        # Correctness proxy from bool or TLP outcome dict (dict is always truthy).
+        if isinstance(outcome, dict):
+            score = 1.0 if outcome.get("success") else 0.0
+        else:
+            score = 1.0 if outcome else 0.0
         self.detector.update(score)
         if self.detector.changed:
             self.hmm.reset(rng)
@@ -109,6 +112,11 @@ class GuardedSeerHybridController:
 
     def act(self, observation: Any, rng: Generator) -> str:
         base_action = self.base.act(observation, rng)
+        # Explore preferred action in discovery/validation so Vision can both
+        # propose and independently validate (otherwise promotion never fires).
+        phase = self.seer.phase_at(self._step).value
+        if phase in ("discovery", "validation") and float(rng.random()) < 0.25:
+            return self.seer_preferred_action
         action, _used = self.seer.advisory_action(
             self._step, base_action, self.seer_preferred_action
         )

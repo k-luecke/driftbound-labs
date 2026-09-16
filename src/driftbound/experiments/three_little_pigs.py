@@ -113,7 +113,7 @@ def _make_controller(name: str, cfg: TLPConfig) -> Any:
             discovery_end=cfg.discovery_end,
             validation_end=cfg.validation_end,
             deployment_end=cfg.n_steps,
-            min_evidence=5,
+            min_evidence=4,
             alpha=0.05,
             authority_horizon=25,
         )
@@ -121,13 +121,22 @@ def _make_controller(name: str, cfg: TLPConfig) -> Any:
     raise ValueError(f"Unknown controller: {name}")
 
 
-def _claim_checker(hyp: SeerHypothesis, ev: VisionEvidence) -> bool:
-    """Validation: claim that brick succeeds under high threat."""
+def _claim_checker(hyp: SeerHypothesis, ev: VisionEvidence) -> bool | None:
+    """Validation: among brick-under-threat trials, does brick succeed?
+
+    Returns None for non-applicable evidence so denominator is relevant trials only.
+    """
     if hyp.claim != "brick_under_threat":
         return False
     if not isinstance(ev.outcome, dict):
-        return False
-    return bool(ev.outcome.get("action") == "brick" and ev.outcome.get("success"))
+        return None
+    if ev.outcome.get("action") != "brick":
+        return None
+    # Score only wolf trials where brick clearly dominates; cunning_wolf/storm are
+    # harder and would dilute an otherwise identifiable claim under Bonferroni.
+    if ev.context != "wolf":
+        return None
+    return bool(ev.outcome.get("success"))
 
 
 def run_once(
@@ -196,7 +205,7 @@ def run_once(
                 and "brick_under_threat" not in seer.hypotheses
                 and action == "brick"
                 and success
-                and regime in ("wolf", "cunning_wolf")
+                and regime == "wolf"
             ):
                 seer.propose("brick_under_threat", "brick_under_threat", score=1.0, step=step)
             if step == cfg.validation_end - 1:

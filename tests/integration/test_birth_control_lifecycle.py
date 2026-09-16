@@ -47,3 +47,42 @@ def test_extinction_protection() -> None:
     # Cannot cull below floor
     assert bc.cull_least_fit(rng) is None
     assert pop.size() == 2
+
+def test_offspring_participate_in_later_lifecycle_steps() -> None:
+    """Children registered into the canonical Population act as later parents."""
+    rng = make_rng(21)
+    pop = Population(max_size=10)
+    bc = BirthControl(population=pop, fitness_threshold=0.0, min_population=2)
+    bc.seed_population(3, rng)
+    for a in pop.living():
+        for _ in range(5):
+            a.record_outcome(correct=True, consequence=0.5, utility=0.5)
+
+    child = bc.reproduce(rng)
+    assert child is not None
+    living_ids = {a.id for a in pop.living()}
+    assert child.id in living_ids
+
+    # Offspring participates: accumulates outcomes in subsequent steps
+    for step in range(3):
+        child.record_outcome(correct=True, consequence=0.4, utility=0.4, step=step)
+    assert child.recent_correctness == 1.0
+    assert child in pop.living()
+
+    # And can be selected as a parent in a later birth on the same Population
+    grandchild = bc.reproduce(rng)
+    assert grandchild is not None
+    assert child.id in grandchild.parent_ids or any(
+        p in grandchild.parent_ids for p in child.parent_ids
+    ) or grandchild.id in {a.id for a in pop.living()}
+    # Stronger: at least one later birth lists the child as parent across a few tries
+    seen_as_parent = child.id in grandchild.parent_ids
+    for _ in range(20):
+        if pop.size() >= pop.max_size:
+            bc.cull_least_fit(rng)
+        nxt = bc.reproduce(rng)
+        if nxt is not None and child.id in nxt.parent_ids:
+            seen_as_parent = True
+            break
+    assert seen_as_parent, "offspring never selected as parent in later steps"
+

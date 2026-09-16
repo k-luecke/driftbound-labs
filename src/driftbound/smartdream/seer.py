@@ -114,20 +114,29 @@ class GuardedSeer:
         m = max(len(self.hypotheses), 1)
 
         for hid, hyp in self.hypotheses.items():
-            if len(val_evidence) < self.min_evidence:
+            # claim_checker may return None for non-applicable evidence rows
+            applicable: list[Any] = []
+            hits = 0
+            for e in val_evidence:
+                result = claim_checker(hyp, e)
+                if result is None:
+                    continue
+                applicable.append(e)
+                if result:
+                    hits += 1
+            n = len(applicable)
+            if n < self.min_evidence:
                 hyp.phase = SeerPhase.VALIDATION
+                hyp.validation_score = hits / n if n else 0.0
                 continue
-            hits = sum(1 for e in val_evidence if claim_checker(hyp, e))
-            n = len(val_evidence)
             # One-sided binomial test under H0: p=0.5 (simplified, honest baseline)
-            # Survival function approximation via normal for CI-small determinism
+            # Normal approximation; one-sided upper tail (phat > 0.5)
             phat = hits / n
             se = np.sqrt(0.25 / n)
             z = (phat - 0.5) / se if se > 0 else 0.0
-            # Approximate two-tailed p via erfc
             from math import erfc, sqrt
 
-            p_raw = erfc(abs(z) / sqrt(2.0))
+            p_raw = 0.5 * erfc(z / sqrt(2.0)) if z > 0 else 1.0
             hyp.p_value = min(1.0, p_raw * m)  # Bonferroni-adjusted
             hyp.validation_score = phat
             hyp.phase = SeerPhase.VALIDATION

@@ -29,3 +29,21 @@ def test_fixed_share_runs() -> None:
     a = fs.act(0, rng)
     fs.update(0, a, {"best_action": "brick"}, rng)
     assert a in fs.actions
+
+def test_hmm_change_uses_success_field_not_dict_truthiness() -> None:
+    """Regression: outcome dicts are always truthy; must read ['success']."""
+    from driftbound.smartdream.controller import HMMChangeController
+
+    rng = make_rng(7)
+    ctrl = HMMChangeController()
+    ctrl.reset(rng)
+    for _ in range(25):
+        action = ctrl.act(0, rng)
+        ctrl.update(0, action, {"best_action": "wood", "success": True}, rng)
+    assert ctrl.detector._mean > 0.9
+    for _ in range(50):
+        action = ctrl.act(1, rng)
+        ctrl.update(1, action, {"best_action": "brick", "success": False}, rng)
+    # Mean must fall — proves we are not scoring dict truthiness as 1.0
+    assert ctrl.detector._mean < 0.5
+
