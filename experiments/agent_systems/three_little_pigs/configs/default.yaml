@@ -1,0 +1,15 @@
+seed: 42
+replications: 3
+n_steps: 200
+discovery_end: 60
+validation_end: 120
+held_out_start: 120
+oom_start: 160
+noise: 0.15
+observe_prob: 0.4
+controllers:
+  - hmm
+  - hmm_change
+  - switching_experts
+  - guarded_seer_hybrid
+  - fixed_policy

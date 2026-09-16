@@ -1,0 +1,7 @@
+discovery_end: 60
+validation_end: 120
+deployment_end: 200
+min_evidence: 5
+alpha: 0.05
+correction: bonferroni
+authority_horizon: 25
