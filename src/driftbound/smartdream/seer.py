@@ -48,8 +48,10 @@ class GuardedSeer:
     min_evidence: int = 5
     alpha: float = 0.05
     authority_horizon: int = 20
+    min_validation_score: float = 0.5
     hypotheses: dict[str, SeerHypothesis] = field(default_factory=dict)
     promotions: int = 0
+    demotions: int = 0
     false_promotions: int = 0
     _discovery_locked: bool = False
     _validation_used_steps: set[int] = field(default_factory=set)
@@ -140,7 +142,11 @@ class GuardedSeer:
             hyp.p_value = min(1.0, p_raw * m)  # Bonferroni-adjusted
             hyp.validation_score = phat
             hyp.phase = SeerPhase.VALIDATION
-            if hyp.p_value < threshold and hits >= self.min_evidence // 2:
+            if (
+                hyp.p_value < threshold
+                and hits >= self.min_evidence // 2
+                and phat >= self.min_validation_score
+            ):
                 hyp.promoted = True
                 hyp.authority_remaining = self.authority_horizon
                 hyp.phase = SeerPhase.DEPLOYMENT
@@ -166,6 +172,7 @@ class GuardedSeer:
             if h.authority_remaining <= 0:
                 h.phase = SeerPhase.DEMOTED
                 h.promoted = False
+                self.demotions += 1
         return seer_action, True
 
     def record_false_promotion(self, hypothesis_id: str) -> None:
@@ -182,10 +189,12 @@ class GuardedSeer:
         return {
             "n_hypotheses": len(self.hypotheses),
             "promotions": self.promotions,
+            "demotions": self.demotions,
             "false_promotions": self.false_promotions,
             "false_promotion_rate": self.false_promotion_rate(),
             "correction": "bonferroni",
             "min_evidence": self.min_evidence,
+            "min_validation_score": self.min_validation_score,
             "windows": {
                 "discovery_end": self.discovery_end,
                 "validation_end": self.validation_end,

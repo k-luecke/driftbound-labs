@@ -10,7 +10,7 @@ Adaptive agents and controllers should remain *calibrated under drift*: observat
 2. **Vision** — observational evidence with observer/subject/context/cost; observation ≠ correctness.
 3. **Guarded Seer** — discovery ≠ validation ≠ deployment; Bonferroni correction; temporary bounded authority; demotion/expiry; no window leakage.
 4. **Baselines** — discrete HMM (simplified), Page-Hinkley, Fixed Share experts — labeled honestly vs future full EM / specialist pools.
-5. **Three Little Pigs** — regime-switching assurance benchmark with costs, partial obs, held-out schedules, OOM failures.
+5. **Three Little Pigs** — regime-switching assurance benchmark with costs, partial obs, held-out schedules, and genuine OOM (`silent_threat` aliases calm obs but requires brick).
 6. **RF systems** — scaffolding and legal/spectrum disclaimer only until real acquisition exists.
 
 ## Deferred (do not activate in this branch)
