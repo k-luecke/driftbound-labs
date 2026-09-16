@@ -135,18 +135,27 @@ class SwitchingExpertsController:
 
 @dataclass
 class GuardedSeerHybridController:
-    """HMM base with temporary Guarded Seer advisory overrides."""
+    """HMM base with temporary Guarded Seer advisory overrides.
+
+    ``explore_prob`` (genome exploration_tendency) controls hard-coded brick
+    exploration in discovery/validation — logged as ``explored``, never as
+    Seer-discovered competence. Promoted authority overrides are separate.
+    ``caution`` (genome intervention_threshold) causally upgrades straw→wood
+    when neither exploring nor under Seer authority.
+    """
 
     seer: GuardedSeer
     name: str = "guarded_seer_hybrid"
     base: HMMController = field(default_factory=HMMController)
     seer_preferred_action: str = "brick"
     explore_prob: float = 0.25
+    caution: float = 0.0
     _step: int = 0
     last_decision: DecisionInfo | None = None
     exploration_count: int = 0
     authority_override_count: int = 0
     demotion_count: int = 0
+    caution_upgrades: int = 0
 
     def reset(self, rng: Generator) -> None:
         self.base.reset(rng)
@@ -155,14 +164,15 @@ class GuardedSeerHybridController:
         self.exploration_count = 0
         self.authority_override_count = 0
         self.demotion_count = 0
+        self.caution_upgrades = 0
 
     def act(self, observation: Any, rng: Generator) -> str:
         base_action = self.base.act(observation, rng)
         phase = self.seer.phase_at(self._step).value
         explored = False
         demoted = False
-        # Explore preferred action in discovery/validation so Vision can both
-        # propose and independently validate the cunning-wolf brick claim.
+        # Hard-coded brick exploration (not Seer competence). Enables Vision to
+        # gather evidence for the OOM claim; logged distinctly as explored.
         if phase in ("discovery", "validation") and float(rng.random()) < self.explore_prob:
             explored = True
             self.exploration_count += 1
@@ -178,6 +188,15 @@ class GuardedSeerHybridController:
             if self.seer.demotions > demotions_before:
                 demoted = True
                 self.demotion_count += 1
+            # Caution trait: upgrade straw→wood when not exploring / overriding
+            if (
+                not override
+                and str(action) == "straw"
+                and self.caution > 0.0
+                and float(rng.random()) < self.caution
+            ):
+                action = "wood"
+                self.caution_upgrades += 1
         self.last_decision = DecisionInfo(
             action=str(action),
             explored=explored,

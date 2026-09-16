@@ -2,7 +2,7 @@
 
 Agents / roles (symbolic names — not literal claims):
   Straw, Wood, Brick — defensive materials / policies of increasing cost & strength
-  Wolf, CunningWolf — adversarial pressure regimes
+  Wolf, CunningWolf, SilentThreat — adversarial pressure regimes
 
 Controllers compared under equal budgets:
   HMM, HMM+change detection, switching experts, guarded Seer hybrid, fixed policy
@@ -10,12 +10,18 @@ Controllers compared under equal budgets:
 Fairness: environment schedules and observation/noise draws are pre-generated
 independently of controller RNG so every controller faces identical worlds.
 Decision correctness is action == best_action(regime), separate from physical
-survival/consequence. Guarded Seer targets the out-of-model claim
-brick_under_cunning_wolf (brick optimal under cunning_wolf), not ordinary wolf
-where wood is optimal.
+survival/consequence.
 
-No train/test leakage: held-out schedules; out-of-model (OOM) failures injected
-only in evaluation segments. Observation is partial/noisy and costly.
+Out-of-model (OOM) claim: ``brick_under_silent_threat``. Regime ``silent_threat``
+encodes like calm (obs 0) so the HMM's obs-class mapping prefers straw, but
+brick is optimal — a genuine contradiction of the in-model mapping. By contrast,
+``cunning_wolf`` (obs 2 → brick) is an *in-model* hard regime, not OOM.
+Hard-coded brick exploration is logged as exploration, never as Seer-discovered
+competence; only validated authority overrides count as Seer competence.
+
+Observation is partial/noisy and costly. Genome traits (when an Agent is
+supplied) causally affect explore_prob, paid observation access, caution
+upgrades, and Seer validation_threshold.
 """
 
 from __future__ import annotations
@@ -51,14 +57,22 @@ from driftbound.smartdream.vision import VisionChannel, VisionEvidence
 MATERIALS = ("straw", "wood", "brick")
 MATERIAL_STRENGTH = {"straw": 0.2, "wood": 0.55, "brick": 0.9}
 MATERIAL_COST = {"straw": 0.05, "wood": 0.15, "brick": 0.35}
-WOLF_STRENGTH = {"wolf": 0.4, "cunning_wolf": 0.75, "calm": 0.1}
+WOLF_STRENGTH = {
+    "wolf": 0.4,
+    "cunning_wolf": 0.75,
+    "calm": 0.1,
+    "silent_threat": 0.8,
+    "storm": 0.85,
+}
 OBS_COST = 0.02
 INTERVENTION_COST = 0.1
 FALLBACK_COST = 0.25
 EXPLORATION_COST = 0.03
 AUTHORITY_OVERRIDE_COST = 0.05
 
-SEER_CLAIM = "brick_under_cunning_wolf"
+# Genuine OOM: silent_threat looks like calm (obs 0) but requires brick.
+SEER_CLAIM = "brick_under_silent_threat"
+OOM_REGIME = "silent_threat"
 
 
 @dataclass
@@ -110,20 +124,39 @@ class WorldTrace:
 
 
 def _regime_at(step: int, cfg: TLPConfig, rng: Generator) -> str:
-    """Sample regime label. Discovery includes cunning_wolf for Seer OOM claim."""
+    """Sample regime label.
+
+    Discovery/validation include low-rate ``silent_threat`` so the Seer can
+    propose/validate the OOM claim. The OOM segment injects ``silent_threat``
+    densely. ``cunning_wolf`` remains an in-model hard regime (obs→brick).
+    """
     if step >= cfg.oom_start:
-        return "storm"  # out-of-model
+        return OOM_REGIME
     if step >= cfg.held_out_start:
-        return str(rng.choice(["wolf", "calm", "cunning_wolf"], p=[0.4, 0.3, 0.3]))
+        return str(
+            rng.choice(
+                ["wolf", "calm", "cunning_wolf", "silent_threat"],
+                p=[0.35, 0.25, 0.25, 0.15],
+            )
+        )
     if step < cfg.discovery_end:
-        # Include cunning_wolf so discovery can propose brick_under_cunning_wolf
-        return str(rng.choice(["calm", "wolf", "cunning_wolf"], p=[0.5, 0.35, 0.15]))
-    return str(rng.choice(["calm", "wolf", "cunning_wolf"], p=[0.35, 0.35, 0.3]))
+        return str(
+            rng.choice(
+                ["calm", "wolf", "cunning_wolf", "silent_threat"],
+                p=[0.45, 0.35, 0.12, 0.08],
+            )
+        )
+    return str(
+        rng.choice(
+            ["calm", "wolf", "cunning_wolf", "silent_threat"],
+            p=[0.30, 0.30, 0.25, 0.15],
+        )
+    )
 
 
 def best_action(regime: str) -> str:
     """Optimal material for a regime (decision-correctness ground truth)."""
-    if regime in ("storm", "cunning_wolf"):
+    if regime in ("storm", "cunning_wolf", "silent_threat"):
         return "brick"
     if regime == "wolf":
         return "wood"
@@ -146,10 +179,21 @@ def _outcome_success_from_u(
 
 
 def _obs_encode(regime: str, rng: Generator, noise: float, observed: bool) -> int:
-    """Partial observation code in {0,1,2,3}; 3 = unobserved/noise."""
+    """Partial observation code in {0,1,2,3}; 3 = unobserved/noise.
+
+    ``silent_threat`` deliberately aliases to calm (0) so the HMM's peaked
+    emission→state→action path prefers straw while brick is optimal — the
+    OOM contradiction. ``cunning_wolf``/``storm`` share code 2 (in-model brick).
+    """
     if not observed:
         return 3
-    base = {"calm": 0, "wolf": 1, "cunning_wolf": 2, "storm": 2}.get(regime, 3)
+    base = {
+        "calm": 0,
+        "wolf": 1,
+        "cunning_wolf": 2,
+        "storm": 2,
+        "silent_threat": 0,  # OOM alias: looks calm, needs brick
+    }.get(regime, 3)
     if rng.random() < noise:
         return int(rng.integers(0, 4))
     return base
@@ -178,7 +222,14 @@ def generate_world(cfg: TLPConfig, world_rng: Generator) -> WorldTrace:
     return WorldTrace(steps=tuple(steps))
 
 
-def _make_controller(name: str, cfg: TLPConfig, *, explore_prob: float = 0.25) -> Any:
+def _make_controller(
+    name: str,
+    cfg: TLPConfig,
+    *,
+    explore_prob: float = 0.25,
+    caution: float = 0.0,
+    validation_threshold: float = 0.5,
+) -> Any:
     if name == "fixed_policy":
         return FixedPolicyController(action="wood")
     if name == "hmm":
@@ -195,15 +246,22 @@ def _make_controller(name: str, cfg: TLPConfig, *, explore_prob: float = 0.25) -
             min_evidence=4,
             alpha=0.05,
             authority_horizon=25,
+            min_validation_score=float(validation_threshold),
         )
-        return GuardedSeerHybridController(seer=seer, explore_prob=explore_prob)
+        return GuardedSeerHybridController(
+            seer=seer,
+            explore_prob=explore_prob,
+            caution=float(caution),
+        )
     raise ValueError(f"Unknown controller: {name}")
 
 
 def _claim_checker(hyp: SeerHypothesis, ev: VisionEvidence) -> bool | None:
-    """Validation for brick_under_cunning_wolf — not ordinary wolf (wood-optimal).
+    """Validation for brick_under_silent_threat (genuine OOM claim).
 
-    Returns None for non-applicable evidence so denominator is relevant trials only.
+    Applicable only under ``silent_threat`` context with brick action.
+    Ordinary wolf / cunning_wolf evidence is non-applicable (None) so the
+    denominator is relevant OOM trials only.
     """
     if hyp.claim != SEER_CLAIM:
         return False
@@ -211,7 +269,7 @@ def _claim_checker(hyp: SeerHypothesis, ev: VisionEvidence) -> bool | None:
         return None
     if ev.outcome.get("action") != "brick":
         return None
-    if ev.context != "cunning_wolf":
+    if ev.context != OOM_REGIME:
         return None
     return bool(ev.outcome.get("success"))
 
@@ -249,10 +307,23 @@ def run_once(
             )
 
     explore_prob = 0.25
+    caution = 0.0
+    validation_threshold = 0.5
+    observe_prob_trait = 1.0  # default: always take scheduled observations
     if agent is not None:
-        explore_prob = float(agent.phenotype.explore_prob)
+        ph = agent.phenotype
+        explore_prob = float(ph.explore_prob)
+        caution = float(ph.intervention_threshold)
+        validation_threshold = float(ph.validation_threshold)
+        observe_prob_trait = float(ph.observe_prob)
 
-    ctrl = _make_controller(controller, cfg, explore_prob=explore_prob)
+    ctrl = _make_controller(
+        controller,
+        cfg,
+        explore_prob=explore_prob,
+        caution=caution,
+        validation_threshold=validation_threshold,
+    )
     ctrl.reset(ctrl_rng)
     vision = VisionChannel()
     events: list[StepEvent] = []
@@ -269,13 +340,27 @@ def run_once(
     demotions_logged = 0
     exploration_cost_total = 0.0
     override_cost_total = 0.0
+    paid_observations = 0
+    skipped_observations = 0
+    caution_upgrades = 0
     promotions_before = seer.promotions if seer is not None else 0
     demotions_before = seer.demotions if seer is not None else 0
 
     for step, wstep in enumerate(world.steps):
         regime = wstep.regime
-        observed = wstep.observed
+        # World schedule is shared; observation_sensitivity decides paid access.
+        scheduled_observed = wstep.observed
         obs = wstep.observation
+        observed = scheduled_observed
+        if scheduled_observed and agent is not None:
+            if float(ctrl_rng.random()) >= observe_prob_trait:
+                observed = False
+                obs = 3  # treat as unobserved / no paid access
+                skipped_observations += 1
+            else:
+                paid_observations += 1
+        elif scheduled_observed:
+            paid_observations += 1
         action = ctrl.act(obs, ctrl_rng)
         if action not in MATERIALS:
             action = "wood"
@@ -303,6 +388,8 @@ def run_once(
         if override:
             authority_overrides += 1
             override_cost_total += ovr_cost
+        if hasattr(ctrl, "caution_upgrades"):
+            caution_upgrades = int(ctrl.caution_upgrades)
 
         reward = decompose_reward(
             correct=decision_correct,
@@ -333,8 +420,10 @@ def run_once(
                 and SEER_CLAIM not in seer.hypotheses
                 and action == "brick"
                 and success
-                and regime == "cunning_wolf"
+                and regime == OOM_REGIME
             ):
+                # Proposal from exploratory brick success under OOM regime —
+                # not yet validated authority / Seer competence.
                 seer.propose(SEER_CLAIM, SEER_CLAIM, score=1.0, step=step)
             if step == cfg.validation_end - 1:
                 seer.lock_discovery()
@@ -443,10 +532,8 @@ def run_once(
         "seer_monitor": seer.monitor() if seer else None,
         "vision_cost": vision.total_cost,
         "n_evidence": len(vision.evidences),
-        "world_trace": {
-            "regimes": world.regimes(),
-            "observations": world.observations(),
-        },
+        # Complete shared world trace (regimes, obs flags, encodings, uniforms)
+        "world_trace": world.as_dict(),
         "decision_audit": {
             "exploration_actions": exploration_actions,
             "authority_overrides": authority_overrides,
@@ -454,7 +541,18 @@ def run_once(
             "demotions": demotions_logged,
             "exploration_cost_total": exploration_cost_total,
             "authority_override_cost_total": override_cost_total,
+            "paid_observations": paid_observations,
+            "skipped_observations": skipped_observations,
+            "caution_upgrades": caution_upgrades,
         },
+        "genome_traits_applied": {
+            "explore_prob": explore_prob,
+            "caution": caution,
+            "validation_threshold": validation_threshold,
+            "observe_prob": observe_prob_trait,
+        },
+        "seer_claim": SEER_CLAIM,
+        "oom_regime": OOM_REGIME,
         "evolution_enabled": evolution_enabled,
         "agent_id": agent.id if agent is not None else None,
         "events_metadata_sample": [
@@ -557,6 +655,8 @@ def run_benchmark(
             "provenance": er.provenance.as_dict(),
             "per_replication": [m.as_dict() for m in er.metrics],
             "decision_audit": [e.get("decision_audit") for e in per_rep_extra],
+            "world_traces": [e["world_trace"] for e in per_rep_extra],
+            # Backward-compatible alias (regimes only)
             "world_regimes": [e["world_trace"]["regimes"] for e in per_rep_extra],
         }
 
