@@ -11,6 +11,8 @@
 
 - **No leakage:** discovery evidence must not enter validation; held-out schedules stay held out.
 - **Equal budgets:** controllers compared under the same step count, observation probability, and cost parameters unless the ablation is the point.
+- **Identical worlds:** pre-generate regime schedules and observation/noise draws on a world RNG; controllers may only use a separate decision RNG.
+- **Correctness ≠ survival:** score `action == best_action(regime)` separately from physical outcome consequence.
 - **Honest labels:** mark code as baseline / simplified / future work.
 - **Costs:** observation, intervention, and fallback costs appear in the reward decomposition:
   `net = correctness + consequence_utility - observation_cost - intervention_cost - fallback_cost`.
